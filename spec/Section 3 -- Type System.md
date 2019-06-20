@@ -8,7 +8,6 @@ are valid.
 TypeSystemDefinition :
   - SchemaDefinition
   - TypeDefinition
-  - TypeExtension
   - DirectiveDefinition
 
 The GraphQL language includes an
@@ -25,6 +24,18 @@ system definitions should return a descriptive error.
 
 Note: The type system definition language is used throughout the remainder of
 this specification document when illustrating example type systems.
+
+
+## Type System Extensions
+
+TypeSystemExtension :
+  - SchemaExtension
+  - TypeExtension
+
+Type system extensions are used to represent a GraphQL type system which has been
+extended from some original type system. For example, this might be used by a
+local service to represent data a GraphQL client only accesses locally, or by a
+GraphQL service which is itself an extension of another GraphQL service.
 
 
 ## Schema
@@ -125,9 +136,9 @@ system definition language can omit the schema definition when the `query`,
 `mutation`, and `subscription` root types are named `Query`, `Mutation`, and
 `Subscription` respectively.
 
-Likewise, when representing a GraphQL schema using the type system language, a
-schema definition should be omitted if it only uses the default root operation
-type names.
+Likewise, when representing a GraphQL schema using the type system definition
+language, a schema definition should be omitted if it only uses the default root
+operation type names.
 
 This example describes a valid complete GraphQL schema, despite not explicitly
 including a `schema` definition. The `Query` type is presumed to be the `query`
@@ -139,19 +150,36 @@ type Query {
 }
 ```
 
+### Schema Extension
+
+SchemaExtension :
+  - extend schema Directives[Const]? { OperationTypeDefinition+ }
+  - extend schema Directives[Const]
+
+Schema extensions are used to represent a schema which has been extended from
+an original schema. For example, this might be used by a GraphQL service which
+adds additional operation types, or additional directives to an existing schema.
+
+**Schema Validation**
+
+Schema extensions have the potential to be invalid if incorrectly defined.
+
+1. The Schema must already be defined.
+2. Any directives provided must not already apply to the original Schema.
+
 
 ## Descriptions
 
 Description : StringValue
 
-Documentation is first-class feature of GraphQL type systems. To ensure
+Documentation is a first-class feature of GraphQL type systems. To ensure
 the documentation of a GraphQL service remains consistent with its capabilities,
 descriptions of GraphQL definitions are provided alongside their definitions and
 made available via introspection.
 
 To allow GraphQL service designers to easily publish documentation alongside the
 capabilities of a GraphQL service, GraphQL descriptions are defined using the
-Markdown syntax (as specified by [CommonMark](http://commonmark.org/)). In the
+Markdown syntax (as specified by [CommonMark](https://commonmark.org/)). In the
 type system definition language, these description strings (often {BlockString})
 occur immediately before the definition they describe.
 
@@ -251,6 +279,34 @@ referred to as "named types". A wrapping type has an underlying named type,
 found by continually unwrapping the type until a named type is found.
 
 
+### Input and Output Types
+
+Types are used throughout GraphQL to describe both the values accepted as input
+to arguments and variables as well as the values output by fields. These two
+uses categorize types as *input types* and *output types*. Some kinds of types,
+like Scalar and Enum types, can be used as both input types and output types;
+other kinds types can only be used in one or the other. Input Object types can
+only be used as input types. Object, Interface, and Union types can only be used
+as output types. Lists and Non-Null types may be used as input types or output
+types depending on how the wrapped type may be used.
+
+IsInputType(type) :
+  * If {type} is a List type or Non-Null type:
+    * Let {unwrappedType} be the unwrapped type of {type}.
+    * Return IsInputType({unwrappedType})
+  * If {type} is a Scalar, Enum, or Input Object type:
+    * Return {true}
+  * Return {false}
+
+IsOutputType(type) :
+  * If {type} is a List type or Non-Null type:
+    * Let {unwrappedType} be the unwrapped type of {type}.
+    * Return IsOutputType({unwrappedType})
+  * If {type} is a Scalar, Object, Interface, Union, or Enum type:
+    * Return {true}
+  * Return {false}
+
+
 ### Type Extensions
 
 TypeExtension :
@@ -261,10 +317,9 @@ TypeExtension :
   - EnumTypeExtension
   - InputObjectTypeExtension
 
-Type extensions are used to represent a GraphQL type system which has been
-extended from some original type system. For example, this might be used by a
-local service to represent data a GraphQL client only accesses locally, or by a
-GraphQL service which is itself an extension of another GraphQL service.
+Type extensions are used to represent a GraphQL type which has been extended
+from some original type. For example, this might be used by a local service to
+represent additional fields a GraphQL client only accesses locally.
 
 
 ## Scalars
@@ -307,17 +362,14 @@ the built-in scalar types should be omitted for brevity.
 **Result Coercion**
 
 A GraphQL server, when preparing a field of a given scalar type, must uphold the
-contract the scalar type describes, either by coercing the value or
-producing an error.
+contract the scalar type describes, either by coercing the value or producing a
+field error if a value cannot be coerced or if coercion may result in data loss.
 
-For example, a GraphQL server could be preparing a field with the scalar type
-`Int` and encounter a floating-point number. Since the server must not break the
-contract by yielding a non-integer, the server should truncate the fractional
-value and only yield the integer value. If the server encountered a boolean
-`true` value, it should return `1`. If the server encountered a string, it may
-attempt to parse the string for a base-10 integer value. If the server
-encounters some value that cannot be reasonably coerced to an `Int`, then it
-must raise a field error.
+A GraphQL service may decide to allow coercing different internal types to the
+expected return type. For example when coercing a field of type `Int` a boolean
+`true` value may produce `1` or a string value `"123"` may be parsed as base-10
+`123`. However if internal type coercion cannot be reasonably performed without
+losing information, then it must raise a field error.
 
 Since this coercion behavior is not observable to clients of the GraphQL server,
 the precise rules of coercion are left to the implementation. The only
@@ -357,9 +409,18 @@ that type to represent this scalar.
 
 **Result Coercion**
 
-GraphQL servers should coerce non-int raw values to Int when possible
-otherwise they must raise a field error. Examples of this may include returning
-`1` for the floating-point number `1.0`, or `2` for the string `"2"`.
+Fields returning the type `Int` expect to encounter 32-bit integer
+internal values.
+
+GraphQL servers may coerce non-integer internal values to integers when
+reasonable without losing information, otherwise they must raise a field error.
+Examples of this may include returning `1` for the floating-point number `1.0`,
+or returning `123` for the string `"123"`. In scenarios where coercion may lose
+data, raising a field error is more appropriate. For example, a floating-point
+number `1.2` should raise a field error instead of being truncated to `1`.
+
+If the integer internal value represents a value less than -2<sup>31</sup> or
+greater than or equal to 2<sup>31</sup>, a field error should be raised.
 
 **Input Coercion**
 
@@ -377,15 +438,19 @@ encoding integer numbers larger than 32-bit.
 ### Float
 
 The Float scalar type represents signed double-precision fractional values
-as specified by [IEEE 754](http://en.wikipedia.org/wiki/IEEE_floating_point).
+as specified by [IEEE 754](https://en.wikipedia.org/wiki/IEEE_floating_point).
 Response formats that support an appropriate double-precision number type
 should use that type to represent this scalar.
 
 **Result Coercion**
 
-GraphQL servers should coerce non-floating-point raw values to Float when
-possible otherwise they must raise a field error. Examples of this may include
-returning `1.0` for the integer number `1`, or `2.0` for the string `"2"`.
+Fields returning the type `Float` expect to encounter double-precision
+floating-point internal values.
+
+GraphQL servers may coerce non-floating-point internal values to `Float` when
+reasonable without losing information, otherwise they must raise a field error.
+Examples of this may include returning `1.0` for the integer number `1`, or
+`123.0` for the string `"123"`.
 
 **Input Coercion**
 
@@ -406,10 +471,12 @@ and that representation must be used here.
 
 **Result Coercion**
 
-GraphQL servers should coerce non-string raw values to String when possible
-otherwise they must raise a field error. Examples of this may include returning
-the string `"true"` for a boolean true value, or the string `"1"` for the
-integer `1`.
+Fields returning the type `String` expect to encounter UTF-8 string internal values.
+
+GraphQL servers may coerce non-string raw values to `String` when reasonable
+without losing information, otherwise they must raise a field error. Examples of
+this may include returning the string `"true"` for a boolean true value, or the
+string `"1"` for the integer `1`.
 
 **Input Coercion**
 
@@ -426,9 +493,11 @@ representation of the integers `1` and `0`.
 
 **Result Coercion**
 
-GraphQL servers should coerce non-boolean raw values to Boolean when possible
-otherwise they must raise a field error. Examples of this may include returning
-`true` for any non-zero number.
+Fields returning the type `Boolean` expect to encounter boolean internal values.
+
+GraphQL servers may coerce non-boolean raw values to `Boolean` when reasonable
+without losing information, otherwise they must raise a field error. Examples of
+this may include returning `true` for non-zero numbers.
 
 **Input Coercion**
 
@@ -448,17 +517,18 @@ often numeric, it should always serialize as a `String`.
 GraphQL is agnostic to ID format, and serializes to string to ensure consistency
 across many formats ID could represent, from small auto-increment numbers, to
 large 128-bit random numbers, to base64 encoded values, or string values of a
-format like [GUID](http://en.wikipedia.org/wiki/Globally_unique_identifier).
+format like [GUID](https://en.wikipedia.org/wiki/Globally_unique_identifier).
 
 GraphQL servers should coerce as appropriate given the ID formats they expect.
 When coercion is not possible they must raise a field error.
 
 **Input Coercion**
 
-When expected as an input type, any string (such as `"4"`) or integer (such
-as `4`) input value should be coerced to ID as appropriate for the ID formats
-a given GraphQL server expects. Any other input value, including float input
-values (such as `4.0`), must raise a query error indicating an incorrect type.
+When expected as an input type, any string (such as `"4"`) or integer (such as
+`4` or `-4`) input value should be coerced to ID as appropriate for the ID
+formats a given GraphQL server expects. Any other input value, including float
+input values (such as `4.0`), must raise a query error indicating an incorrect
+type.
 
 
 ### Scalar Extensions
@@ -723,10 +793,17 @@ Object types have the potential to be invalid if incorrectly defined. This set
 of rules must be adhered to by every Object type in a GraphQL schema.
 
 1. An Object type must define one or more fields.
-2. The fields of an Object type must have unique names within that Object type;
-   no two fields may share the same name.
-3. Each field of an Object type must not have a name which begins with the
-   characters {"__"} (two underscores).
+2. For each field of an Object type:
+   1. The field must have a unique name within that Object type;
+      no two fields may share the same name.
+   2. The field must not have a name which begins with the
+      characters {"__"} (two underscores).
+   3. The field must return a type where {IsOutputType(fieldType)} returns {true}.
+   4. For each argument of the field:
+      1. The argument must not have a name which begins with the
+         characters {"__"} (two underscores).
+      2. The argument must accept a type where {IsInputType(argumentType)}
+         returns {true}.
 4. An object type may declare that it implements one or more unique interfaces.
 5. An object type must be a super-set of all interfaces it implements:
    1. The object type must include a field of the same name for every field
@@ -800,7 +877,8 @@ May yield the result:
 }
 ```
 
-The type of an object field argument can be any Input type.
+The type of an object field argument must be an input type (any type except an
+Object, Interface, or Union type).
 
 
 ### Field Deprecation
@@ -975,10 +1053,18 @@ Interfaces are never valid inputs.
 Interface types have the potential to be invalid if incorrectly defined.
 
 1. An Interface type must define one or more fields.
-2. The fields of an Interface type must have unique names within that Interface
-   type; no two fields may share the same name.
-3. Each field of an Interface type must not have a name which begins with the
-   characters {"__"} (two underscores).
+2. For each field of an Interface type:
+   1. The field must have a unique name within that Interface type;
+      no two fields may share the same name.
+   2. The field must not have a name which begins with the
+      characters {"__"} (two underscores).
+   3. The field must return a type where {IsOutputType(fieldType)}
+      returns {true}.
+   4. For each argument of the field:
+      1. The argument must not have a name which begins with the
+         characters {"__"} (two underscores).
+      2. The argument must accept a type where {IsInputType(argumentType)}
+         returns {true}.
 
 
 ### Interface Extensions
@@ -1126,10 +1212,10 @@ Unions are never valid inputs.
 
 Union types have the potential to be invalid if incorrectly defined.
 
-1. The member types of a Union type must all be Object base types;
+1. A Union type must include one or more unique member types.
+2. The member types of a Union type must all be Object base types;
    Scalar, Interface and Union types must not be member types of a Union.
    Similarly, wrapping types must not be member types of a Union.
-2. A Union type must define one or more unique member types.
 
 
 ### Union Extensions
@@ -1262,25 +1348,36 @@ type of an Object or Interface field.
 **Input Coercion**
 
 The value for an input object should be an input object literal or an unordered
-map supplied by a variable, otherwise an error should be thrown. In either
-case, the input object literal or unordered map should not contain any entries
+map supplied by a variable, otherwise a query error must be thrown. In either
+case, the input object literal or unordered map must not contain any entries
 with names not defined by a field of this input object type, otherwise an error
-should be thrown.
+must be thrown.
 
 The result of coercion is an unordered map with an entry for each field both
-defined by the input object type and provided with a value. If the value {null}
-was provided, an entry in the coerced unordered map must exist for that field.
-In other words, there is a semantic difference between the explicitly provided
-value {null} versus having not provided a value.
+defined by the input object type and for which a value exists. The resulting map
+is constructed with the following rules:
 
-The value of each entry in the coerced unordered map is the result of input
-coercion of the value provided for that field for the type of the field defined
-by the input object type
+* If no value is provided for a defined input object field and that field
+  definition provides a default value, the default value should be used. If no
+  default value is provided and the input object field's type is non-null, an
+  error should be thrown. Otherwise, if the field is not required, then no entry
+  is added to the coerced unordered map.
 
-Any non-nullable field defined by the input object type which does not have
-a corresponding entry in the original value, or is represented by a variable
-which was not provided a value, or for which the value {null} was provided, an
-error should be thrown.
+* If the value {null} was provided for an input object field, and the field's
+  type is not a non-null type, an entry in the coerced unordered map is given
+  the value {null}. In other words, there is a semantic difference between the
+  explicitly provided value {null} versus having not provided a value.
+
+* If a literal value is provided for an input object field, an entry in the
+  coerced unordered map is given the result of coercing that value according
+  to the input coercion rules for the type of that field.
+
+* If a variable is provided for an input object field, the runtime value of that
+  variable must be used. If the runtime value is {null} and the field type
+  is non-null, a field error must be thrown. If no runtime value is provided,
+  the variable definition's default value should be used. If the variable
+  definition does not provide a default value, the input object field
+  definition's default value should be used.
 
 Following are examples of input coercion for an input object type with a
 `String` field `a` and a required (non-null) `Int!` field `b`:
@@ -1313,10 +1410,14 @@ Literal Value            | Variables               | Coerced Value
 
 **Type Validation**
 
-1. An Input Object type must define one or more fields.
-2. The fields of an Input Object type must have unique names within that
-   Input Object type; no two fields may share the same name.
-3. The return types of each defined field must be an Input type.
+1. An Input Object type must define one or more input fields.
+2. For each input field of an Input Object type:
+   1. The input field must have a unique name within that Input Object type;
+      no two input fields may share the same name.
+   2. The input field must not have a name which begins with the
+      characters {"__"} (two underscores).
+   3. The input field must accept a type where {IsInputType(inputFieldType)}
+      returns {true}.
 
 
 ### Input Object Extensions
@@ -1352,10 +1453,19 @@ in square brackets like this: `pets: [Pet]`.
 
 GraphQL servers must return an ordered list as the result of a list type. Each
 item in the list must be the result of a result coercion of the item type. If a
-reasonable coercion is not possible they must raise a field error. In
+reasonable coercion is not possible it must raise a field error. In
 particular, if a non-list is returned, the coercion should fail, as this
 indicates a mismatch in expectations between the type system and the
 implementation.
+
+If a list's item type is nullable, then errors occurring during preparation or
+coercion of an individual item in the list must result in a the value {null} at
+that position in the list along with an error added to the response. If a list's
+item type is non-null, an error occurring at an individual item in the list must
+result in a field error for the entire list.
+
+Note: For more information on the error handling process, see "Errors and
+Non-Nullability" within the Execution section.
 
 **Input Coercion**
 
@@ -1363,15 +1473,27 @@ When expected as an input, list values are accepted only when each item in the
 list can be accepted by the list's item type.
 
 If the value passed as an input to a list type is *not* a list and not the
-{null} value, it should be coerced as though the input was a list of size one,
-where the value passed is the only item in the list. This is to allow inputs
-that accept a "var args" to declare their input type as a list; if only one
-argument is passed (a common case), the client can just pass that value rather
-than constructing the list.
+{null} value, then the result of input coercion is a list of size one,
+where the single item value is the result of input coercion for the list's item
+type on the provided value (note this may apply recursively for nested lists).
 
-Note that when a {null} value is provided via a runtime variable value for a
-list type, the value is interpreted as no list being provided, and not a list of
-size one with the value {null}.
+This allow inputs which accept one or many arguments (sometimes referred to as
+"var args") to declare their input type as a list while for the common case of a
+single value, a client can just pass that value directly rather than
+constructing the list.
+
+Following are examples of input coercion with various list types and values:
+
+Expected Type | Provided Value   | Coerced Value
+------------- | ---------------- | ---------------------------
+`[Int]`       | `[1, 2, 3]`      | `[1, 2, 3]`
+`[Int]`       | `[1, "b", true]` | Error: Incorrect item value
+`[Int]`       | `1`              | `[1]`
+`[Int]`       | `null`           | `null`
+`[[Int]]`     | `[[1], [2, 3]]`  | `[[1], [2, 3]]`
+`[[Int]]`     | `[1, 2, 3]`      | Error: Incorrect item value
+`[[Int]]`     | `1`              | `[[1]]`
+`[[Int]]`     | `null`           | `null`
 
 
 ## Non-Null
@@ -1403,7 +1525,7 @@ should be performed. If that result was not {null}, then the result of coercing
 the Non-Null type is that result. If that result was {null}, then a field error
 must be raised.
 
-Note: When a field error is raised on a non-null value, the error propogates to
+Note: When a field error is raised on a non-null value, the error propagates to
 the parent field. For more information on this process, see
 "Errors and Non-Nullability" within the Execution section.
 
@@ -1418,7 +1540,7 @@ If the value provided to the Non-Null type is provided with a literal value
 other than {null}, or a Non-Null variable value, it is coerced using the input
 coercion for the wrapped type.
 
-Example: A non-null argument cannot be omitted.
+A non-null argument cannot be omitted:
 
 ```graphql counter-example
 {
@@ -1426,7 +1548,7 @@ Example: A non-null argument cannot be omitted.
 }
 ```
 
-Example: The value {null} cannot be provided to a non-null argument.
+The value {null} cannot be provided to a non-null argument:
 
 ```graphql counter-example
 {
@@ -1434,7 +1556,7 @@ Example: The value {null} cannot be provided to a non-null argument.
 }
 ```
 
-Example: A variable of a nullable type cannot be provided to a non-null argument.
+A variable of a nullable type cannot be provided to a non-null argument:
 
 ```graphql example
 query withNullableVariable($var: String) {
@@ -1448,6 +1570,39 @@ a non-null input type as invalid.
 **Type Validation**
 
 1. A Non-Null type must not wrap another Non-Null type.
+
+
+### Combining List and Non-Null
+
+The List and Non-Null wrapping types can compose, representing more complex
+types. The rules for result coercion and input coercion of Lists and Non-Null
+types apply in a recursive fashion.
+
+For example if the inner item type of a List is Non-Null (e.g. `[T!]`), then
+that List may not contain any {null} items. However if the inner type of a
+Non-Null is a List (e.g. `[T]!`), then {null} is not accepted however an empty
+list is accepted.
+
+Following are examples of result coercion with various types and values:
+
+Expected Type | Internal Value   | Coerced Result
+------------- | ---------------- | ---------------------------
+`[Int]`       | `[1, 2, 3]`      | `[1, 2, 3]`
+`[Int]`       | `null`           | `null`
+`[Int]`       | `[1, 2, null]`   | `[1, 2, null]`
+`[Int]`       | `[1, 2, Error]`  | `[1, 2, null]` (With logged error)
+`[Int]!`      | `[1, 2, 3]`      | `[1, 2, 3]`
+`[Int]!`      | `null`           | Error: Value cannot be null
+`[Int]!`      | `[1, 2, null]`   | `[1, 2, null]`
+`[Int]!`      | `[1, 2, Error]`  | `[1, 2, null]` (With logged error)
+`[Int!]`      | `[1, 2, 3]`      | `[1, 2, 3]`
+`[Int!]`      | `null`           | `null`
+`[Int!]`      | `[1, 2, null]`   | `null` (With logged coercion error)
+`[Int!]`      | `[1, 2, Error]`  | `null` (With logged error)
+`[Int!]!`     | `[1, 2, 3]`      | `[1, 2, 3]`
+`[Int!]!`     | `null`           | Error: Value cannot be null
+`[Int!]!`     | `[1, 2, null]`   | Error: Item cannot be null
+`[Int!]!`     | `[1, 2, Error]`  | Error: Error occurred in item
 
 
 ## Directives
@@ -1470,6 +1625,7 @@ ExecutableDirectiveLocation : one of
   `FRAGMENT_DEFINITION`
   `FRAGMENT_SPREAD`
   `INLINE_FRAGMENT`
+  `VARIABLE_DEFINITION`
 
 TypeSystemDirectiveLocation : one of
   `SCHEMA`
@@ -1495,8 +1651,7 @@ provide the `@deprecated` directive if representing deprecated portions of
 the schema.
 
 Directives must only be used in the locations they are declared to belong in.
-In this example, a directive is defined which can be used to annotate a
-fragment definition:
+In this example, a directive is defined which can be used to annotate a field:
 
 ```graphql example
 directive @example on FIELD
@@ -1544,7 +1699,13 @@ directive @invalidExample(arg: String @invalidExample) on ARGUMENT_DEFINITION
 2. A directive definition must not contain the use of a directive which
    references itself indirectly by referencing a Type or Directive which
    transitively includes a reference to this directive.
-
+3. The directive must not have a name which begins with the characters
+   {"__"} (two underscores).
+4. For each argument of the directive:
+   1. The argument must not have a name which begins with the
+      characters {"__"} (two underscores).
+   2. The argument must accept a type where {IsInputType(argumentType)}
+      returns {true}.
 
 ### @skip
 
@@ -1586,7 +1747,7 @@ query myQuery($someTest: Boolean) {
 ```
 
 Note: Neither `@skip` nor `@include` has precedence over the other. In the case
-that both the `@skip` and `@include` directives are provided in on the same the
+that both the `@skip` and `@include` directives are provided on the same
 field or fragment, it *must* be queried only if the `@skip` condition is false
 *and* the `@include` condition is true. Stated conversely, the field or fragment
 must *not* be queried if either the `@skip` condition is true *or* the
@@ -1606,7 +1767,7 @@ to indicate deprecated portions of a GraphQL service's schema, such as
 deprecated fields on a type or deprecated enum values.
 
 Deprecations include a reason for why it is deprecated, which is formatted using
-Markdown syntax (as specified by [CommonMark](http://commonmark.org/)).
+Markdown syntax (as specified by [CommonMark](https://commonmark.org/)).
 
 In this example type definition, `oldField` is deprecated in favor of
 using `newField`.

@@ -82,20 +82,28 @@ CoerceVariableValues(schema, operation, variableValues):
   * For each {variableDefinition} in {variableDefinitions}:
     * Let {variableName} be the name of {variableDefinition}.
     * Let {variableType} be the expected type of {variableDefinition}.
+    * Assert: {IsInputType(variableType)} must be {true}.
     * Let {defaultValue} be the default value for {variableDefinition}.
-    * Let {value} be the value provided in {variableValues} for the name {variableName}.
-    * If {value} does not exist (was not provided in {variableValues}):
-      * If {defaultValue} exists (including {null}):
+    * Let {hasValue} be {true} if {variableValues} provides a value for the
+      name {variableName}.
+    * Let {value} be the value provided in {variableValues} for the
+      name {variableName}.
+    * If {hasValue} is not {true} and {defaultValue} exists (including {null}):
+      * Add an entry to {coercedValues} named {variableName} with the
+        value {defaultValue}.
+    * Otherwise if {variableType} is a Non-Nullable type, and either {hasValue}
+      is not {true} or {value} is {null}, throw a query error.
+    * Otherwise if {hasValue} is true:
+      * If {value} is {null}:
         * Add an entry to {coercedValues} named {variableName} with the
-          value {defaultValue}.
-      * Otherwise if {variableType} is a Non-Nullable type, throw a query error.
-      * Otherwise, continue to the next variable definition.
-    * Otherwise, if {value} cannot be coerced according to the input coercion
-      rules of {variableType}, throw a query error.
-    * Let {coercedValue} be the result of coercing {value} according to the
-      input coercion rules of {variableType}.
-    * Add an entry to {coercedValues} named {variableName} with the
-      value {coercedValue}.
+          value {null}.
+      * Otherwise:
+        * If {value} cannot be coerced according to the input coercion
+          rules of {variableType}, throw a query error.
+        * Let {coercedValue} be the result of coercing {value} according to the
+          input coercion rules of {variableType}.
+        * Add an entry to {coercedValues} named {variableName} with the
+          value {coercedValue}.
   * Return {coercedValues}.
 
 Note: This algorithm is very similar to {CoerceArgumentValues()}.
@@ -222,6 +230,16 @@ single machine in a service. Durability and availability may be improved by
 having separate dedicated services for managing subscription state and client
 connectivity.
 
+**Delivery Agnostic**
+
+GraphQL subscriptions do not require any specific serialization format or
+transport mechanism. Subscriptions specifies algorithms for the creation of a
+stream, the content of each payload on that stream, and the closing of that
+stream. There are intentionally no specifications for message acknowledgement,
+buffering, resend requests, or any other quality of service (QoS) details.
+Message serialization, transport mechanisms, and quality of service details
+should be chosen by the implementing service.
+
 #### Source Stream
 
 A Source Stream represents the sequence of events, each of which will
@@ -311,20 +329,30 @@ ExecuteSelectionSet(selectionSet, objectType, objectValue, variableValues):
     * Let {fieldName} be the name of the first entry in {fields}.
       Note: This value is unaffected if an alias is used.
     * Let {fieldType} be the return type defined for the field {fieldName} of {objectType}.
-    * If {fieldType} is {null}:
-      * Continue to the next iteration of {groupedFieldSet}.
-    * Let {responseValue} be {ExecuteField(objectType, objectValue, fields, fieldType, variableValues)}.
-    * Set {responseValue} as the value for {responseKey} in {resultMap}.
+    * If {fieldType} is defined:
+      * Let {responseValue} be {ExecuteField(objectType, objectValue, fields, fieldType, variableValues)}.
+      * Set {responseValue} as the value for {responseKey} in {resultMap}.
   * Return {resultMap}.
 
 Note: {resultMap} is ordered by which fields appear first in the query. This
 is explained in greater detail in the Field Collection section below.
 
+**Errors and Non-Null Fields**
+
+If during {ExecuteSelectionSet()} a field with a non-null {fieldType} throws a
+field error then that error must propagate to this entire selection set, either
+resolving to {null} if allowed or further propagated to a parent field.
+
+If this occurs, any sibling fields which have not yet executed or have not yet
+yielded a value may be cancelled to avoid unnecessary work.
+
+See the [Errors and Non-Nullability](#sec-Errors-and-Non-Nullability) section
+of Field Execution for more about this behavior.
 
 ### Normal and Serial Execution
 
 Normally the executor can execute the entries in a grouped field set in whatever
-order it chooses (often in parallel). Because the resolution of fields other
+order it chooses (normally in parallel). Because the resolution of fields other
 than top-level mutation fields must always be side effect-free and idempotent,
 the execution order must not affect the result, and hence the server has the
 freedom to execute the field entries in whatever order it deems optimal.
@@ -347,7 +375,7 @@ chose (however of course `birthday` must be resolved before `month`, and
 `address` before `street`).
 
 When executing a mutation, the selections in the top most selection set will be
-executed in serial order.
+executed in serial order, starting with the first appearing field textually.
 
 When executing a grouped field set serially, the executor must consider each entry
 from the grouped field set in the order provided in the grouped field set. It must
@@ -422,9 +450,9 @@ A correct executor must generate the following result for that selection set:
 
 Before execution, the selection set is converted to a grouped field set by
 calling {CollectFields()}. Each entry in the grouped field set is a list of
-fields that share a response key. This ensures all fields with the same response
-key (alias or field name) included via referenced fragments are executed at the
-same time.
+fields that share a response key (the alias if defined, otherwise the field
+name). This ensures all fields with the same response key included via
+referenced fragments are executed at the same time.
 
 As an example, collecting the fields of this selection set would collect two
 instances of the field `a` and one of field `b`:
@@ -461,7 +489,7 @@ CollectFields(objectType, selectionSet, variableValues, visitedFragments):
       * If {includeDirective}'s {if} argument is not {true} and is not a variable in {variableValues} with the value {true}, continue with the next
       {selection} in {selectionSet}.
     * If {selection} is a {Field}:
-      * Let {responseKey} be the response key of {selection}.
+      * Let {responseKey} be the response key of {selection} (the alias if defined, otherwise the field name).
       * Let {groupForResponseKey} be the list in {groupedFields} for
         {responseKey}; if no such list exists, create it as an empty list.
       * Append {selection} to the {groupForResponseKey}.
@@ -481,7 +509,7 @@ CollectFields(objectType, selectionSet, variableValues, visitedFragments):
       * Let {fragmentGroupedFieldSet} be the result of calling
         {CollectFields(objectType, fragmentSelectionSet, visitedFragments)}.
       * For each {fragmentGroup} in {fragmentGroupedFieldSet}:
-        * Let {responseKey} be the response key shared by all fields in {fragmentGroup}
+        * Let {responseKey} be the response key shared by all fields in {fragmentGroup}.
         * Let {groupForResponseKey} be the list in {groupedFields} for
           {responseKey}; if no such list exists, create it as an empty list.
         * Append all items in {fragmentGroup} to {groupForResponseKey}.
@@ -492,7 +520,7 @@ CollectFields(objectType, selectionSet, variableValues, visitedFragments):
       * Let {fragmentSelectionSet} be the top-level selection set of {selection}.
       * Let {fragmentGroupedFieldSet} be the result of calling {CollectFields(objectType, fragmentSelectionSet, variableValues, visitedFragments)}.
       * For each {fragmentGroup} in {fragmentGroupedFieldSet}:
-        * Let {responseKey} be the response key shared by all fields in {fragmentGroup}
+        * Let {responseKey} be the response key shared by all fields in {fragmentGroup}.
         * Let {groupForResponseKey} be the list in {groupedFields} for
           {responseKey}; if no such list exists, create it as an empty list.
         * Append all items in {fragmentGroup} to {groupForResponseKey}.
@@ -518,6 +546,7 @@ set or coercing a scalar value.
 
 ExecuteField(objectType, objectValue, fieldType, fields, variableValues):
   * Let {field} be the first entry in {fields}.
+  * Let {fieldName} be the field name of {field}.
   * Let {argumentValues} be the result of {CoerceArgumentValues(objectType, field, variableValues)}
   * Let {resolvedValue} be {ResolveFieldValue(objectType, objectValue, fieldName, argumentValues)}.
   * Return the result of {CompleteValue(fieldType, fields, resolvedValue, variableValues)}.
@@ -527,11 +556,10 @@ ExecuteField(objectType, objectValue, fieldType, fields, variableValues):
 
 Fields may include arguments which are provided to the underlying runtime in
 order to correctly produce a value. These arguments are defined by the field in
-the type system to have a specific input type: Scalars, Enum, Input Object, or
-List or Non-Null wrapped variations of these three.
+the type system to have a specific input type.
 
-At each argument position in a query may be a literal value or a variable to be
-provided at runtime.
+At each argument position in a query may be a literal {Value}, or a {Variable}
+to be provided at runtime.
 
 CoerceArgumentValues(objectType, field, variableValues):
   * Let {coercedValues} be an empty unordered Map.
@@ -543,30 +571,36 @@ CoerceArgumentValues(objectType, field, variableValues):
     * Let {argumentName} be the name of {argumentDefinition}.
     * Let {argumentType} be the expected type of {argumentDefinition}.
     * Let {defaultValue} be the default value for {argumentDefinition}.
-    * Let {value} be the value provided in {argumentValues} for the name {argumentName}.
-    * If {value} is a Variable:
-      * Let {variableName} be the name of Variable {value}.
-      * Let {variableValue} be the value provided in {variableValues} for the name {variableName}.
-      * If {variableValue} exists (including {null}):
-        * Add an entry to {coercedValues} named {argName} with the
-          value {variableValue}.
-      * Otherwise, if {defaultValue} exists (including {null}):
-        * Add an entry to {coercedValues} named {argName} with the
-          value {defaultValue}.
-      * Otherwise, if {argumentType} is a Non-Nullable type, throw a field error.
-      * Otherwise, continue to the next argument definition.
-    * Otherwise, if {value} does not exist (was not provided in {argumentValues}:
-      * If {defaultValue} exists (including {null}):
-        * Add an entry to {coercedValues} named {argName} with the
-          value {defaultValue}.
-      * Otherwise, if {argumentType} is a Non-Nullable type, throw a field error.
-      * Otherwise, continue to the next argument definition.
-    * Otherwise, if {value} cannot be coerced according to the input coercion
-      rules of {argType}, throw a field error.
-    * Let {coercedValue} be the result of coercing {value} according to the
-      input coercion rules of {argType}.
-    * Add an entry to {coercedValues} named {argName} with the
-      value {coercedValue}.
+    * Let {hasValue} be {true} if {argumentValues} provides a value for the
+      name {argumentName}.
+    * Let {argumentValue} be the value provided in {argumentValues} for the
+      name {argumentName}.
+    * If {argumentValue} is a {Variable}:
+      * Let {variableName} be the name of {argumentValue}.
+      * Let {hasValue} be {true} if {variableValues} provides a value for the
+        name {variableName}.
+      * Let {value} be the value provided in {variableValues} for the
+        name {variableName}.
+    * Otherwise, let {value} be {argumentValue}.
+    * If {hasValue} is not {true} and {defaultValue} exists (including {null}):
+      * Add an entry to {coercedValues} named {argumentName} with the
+        value {defaultValue}.
+    * Otherwise if {argumentType} is a Non-Nullable type, and either {hasValue}
+      is not {true} or {value} is {null}, throw a field error.
+    * Otherwise if {hasValue} is true:
+      * If {value} is {null}:
+        * Add an entry to {coercedValues} named {argumentName} with the
+          value {null}.
+      * Otherwise, if {argumentValue} is a {Variable}:
+        * Add an entry to {coercedValues} named {argumentName} with the
+          value {value}.
+      * Otherwise:
+        * If {value} cannot be coerced according to the input coercion
+            rules of {variableType}, throw a field error.
+        * Let {coercedValue} be the result of coercing {value} according to the
+          input coercion rules of {variableType}.
+        * Add an entry to {coercedValues} named {argumentName} with the
+          value {coercedValue}.
   * Return {coercedValues}.
 
 Note: Variable values are not coerced because they are expected to be coerced
@@ -624,9 +658,9 @@ CompleteValue(fieldType, fields, result, variableValues):
     * If {fieldType} is an Object type.
       * Let {objectType} be {fieldType}.
     * Otherwise if {fieldType} is an Interface or Union type.
-      * Let {objectType} be ResolveAbstractType({fieldType}, {result}).
+      * Let {objectType} be {ResolveAbstractType(fieldType, result)}.
     * Let {subSelectionSet} be the result of calling {MergeSelectionSets(fields)}.
-    * Return the result of evaluating ExecuteSelectionSet(subSelectionSet, objectType, result, variableValues) *normally* (allowing for parallelization).
+    * Return the result of evaluating {ExecuteSelectionSet(subSelectionSet, objectType, result, variableValues)} *normally* (allowing for parallelization).
 
 **Resolving Abstract Types**
 
@@ -702,5 +736,6 @@ resolves to {null}, then the entire list must resolve to {null}.
 If the `List` type is also wrapped in a `Non-Null`, the field error continues
 to propagate upwards.
 
-If all fields from the root of the request to the source of the error return
-`Non-Null` types, then the {"data"} entry in the response should be {null}.
+If all fields from the root of the request to the source of the field error
+return `Non-Null` types, then the {"data"} entry in the response should
+be {null}.

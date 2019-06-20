@@ -5,14 +5,15 @@ GraphQL
 
 **Introduction**
 
-This is a Draft RFC Specification for GraphQL, a query language created by
-Facebook in 2012 for describing the capabilities and requirements of data models
-for client-server applications. The development of this standard started
-in 2015. GraphQL is a new and evolving language and is not complete. Significant
-enhancement will continue in future editions of this specification.
+This is the specification for GraphQL, a query language and execution engine
+originally created at Facebook in 2012 for describing the capabilities and
+requirements of data models for client-server applications. The development of
+this open standard started in 2015.
 
-Previous releases of the GraphQL specification can be found at permalinks that
-match their [release tag](https://github.com/facebook/graphql/releases).
+GraphQL has evolved and may continue to evolve in future editions of this
+specification. Previous editions of the GraphQL specification can be found at
+permalinks that match their [release tag](https://github.com/facebook/graphql/releases).
+The latest working draft release can be found at [facebook.github.io/graphql/draft/](https://facebook.github.io/graphql/draft/).
 
 **Copyright notice**
 
@@ -22,7 +23,7 @@ As of September 26, 2017, the following persons or entities have made this
 Specification available under the Open Web Foundation Final Specification
 Agreement (OWFa 1.0), which is available at [openwebfoundation.org](http://www.openwebfoundation.org/legal/the-owf-1-0-agreements/owfa-1-0).
 
-Facebook, Inc.
+* Facebook, Inc.
 
 You can review the signed copies of the Open Web Foundation Final Specification
 Agreement Version 1.0 for this specification at [github.com/facebook/graphql](https://github.com/facebook/graphql/tree/master/signed-agreements),
@@ -74,6 +75,10 @@ is equivalent. Algorithms described in this document are written to be easy to
 understand. Implementers are encouraged to include equivalent but
 optimized implementations.
 
+See [Appendix A](#sec-Appendix-Notation-Conventions) for more details
+about the definition of algorithms and other notational conventions used in this
+document.
+
 
 **Non-Normative Portions**
 
@@ -102,20 +107,20 @@ explicitly in prose (e.g. "Note: ") or are set apart in a note block, like this:
 Note: This is an example of a non-normative note.
 
 
-# [Overview](Section 1 -- Overview.md)
+# [Overview](Section%201%20--%20Overview.md)
 
-# [Language](Section 2 -- Language.md)
+# [Language](Section%202%20--%20Language.md)
 
-# [Type System](Section 3 -- Type System.md)
+# [Type System](Section%203%20--%20Type%20System.md)
 
-# [Introspection](Section 4 -- Introspection.md)
+# [Introspection](Section%204%20--%20Introspection.md)
 
-# [Validation](Section 5 -- Validation.md)
+# [Validation](Section%205%20--%20Validation.md)
 
-# [Execution](Section 6 -- Execution.md)
+# [Execution](Section%206%20--%20Execution.md)
 
-# [Response](Section 7 -- Response.md)
+# [Response](Section%207%20--%20Response.md)
 
-# [Appendix: Notation Conventions](Appendix A -- Notation Conventions.md)
+# [Appendix: Notation Conventions](Appendix%20A%20--%20Notation%20Conventions.md)
 
-# [Appendix: Grammar Summary](Appendix B -- Grammar Summary.md)
+# [Appendix: Grammar Summary](Appendix%20B%20--%20Grammar%20Summary.md)

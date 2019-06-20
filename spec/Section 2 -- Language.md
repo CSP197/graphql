@@ -10,13 +10,16 @@ tokens (indivisible lexical units). These tokens are defined in a lexical
 grammar which matches patterns of source characters (defined by a
 double-colon `::`).
 
+Note: See [Appendix A](#sec-Appendix-Notation-Conventions) for more details about the definition of lexical and syntactic grammar and other notational conventions
+used in this document.
+
 
 ## Source Text
 
 SourceCharacter :: /[\u0009\u000A\u000D\u0020-\uFFFF]/
 
 GraphQL documents are expressed as a sequence of
-[Unicode](http://unicode.org/standard/standard.html) characters. However, with
+[Unicode](https://unicode.org/standard/standard.html) characters. However, with
 few exceptions, most of GraphQL is expressed only in the original non-control
 ASCII range so as to be as widely compatible with as many existing tools,
 languages, and serialization formats as possible and avoid display issues in
@@ -171,6 +174,7 @@ Document : Definition+
 Definition :
   - ExecutableDefinition
   - TypeSystemDefinition
+  - TypeSystemExtension
 
 ExecutableDefinition :
   - OperationDefinition
@@ -181,9 +185,9 @@ by a GraphQL service or client. A document contains multiple definitions, either
 executable or representative of a GraphQL type system.
 
 Documents are only executable by a GraphQL service if they contain an
-{OperationDefinition}, only contain {ExecutableDefinition} and do not contain
-{TypeSystemDefinition}. However documents which do not contain
-{OperationDefinition} or do contain {TypeSystemDefinition} may still be parsed
+{OperationDefinition} and otherwise only contain {ExecutableDefinition}.
+However documents which do not contain {OperationDefinition} or do contain
+{TypeSystemDefinition} or {TypeSystemExtension} may still be parsed
 and validated to allow client tools to represent many GraphQL uses which may
 appear across many individual files.
 
@@ -195,8 +199,8 @@ multiple operations to a GraphQL service, the name of the desired operation to
 be executed must also be provided.
 
 GraphQL services which only seek to provide GraphQL query execution may choose
-to only include {ExecutableDefinition} and omit the {TypeSystemDefinition} rule
-from {Definition}.
+to only include {ExecutableDefinition} and omit the {TypeSystemDefinition} and
+{TypeSystemExtension} rules from {Definition}.
 
 
 ## Operations
@@ -880,7 +884,7 @@ For example, these two field calls are similar, but are not identical:
 }
 ```
 
-The first has explictly provided {null} to the argument "arg", while the second
+The first has explicitly provided {null} to the argument "arg", while the second
 has implicitly not provided a value to the argument "arg". These two forms may
 be interpreted differently. For example, a mutation representing deleting a
 field vs not altering a field, respectively. Neither form may be used for an
@@ -982,7 +986,7 @@ Variable : $ Name
 
 VariableDefinitions : ( VariableDefinition+ )
 
-VariableDefinition : Variable : Type DefaultValue?
+VariableDefinition : Variable : Type DefaultValue? Directives[Const]?
 
 DefaultValue : = Value[Const]
 

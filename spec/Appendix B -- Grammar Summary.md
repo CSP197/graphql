@@ -96,6 +96,7 @@ Document : Definition+
 Definition :
   - ExecutableDefinition
   - TypeSystemDefinition
+  - TypeSystemExtension
 
 ExecutableDefinition :
   - OperationDefinition
@@ -161,7 +162,7 @@ ObjectField[Const] : Name : Value[?Const]
 
 VariableDefinitions : ( VariableDefinition+ )
 
-VariableDefinition : Variable : Type DefaultValue?
+VariableDefinition : Variable : Type DefaultValue? Directives[Const]?
 
 Variable : $ Name
 
@@ -187,10 +188,17 @@ Directive[Const] : @ Name Arguments[?Const]?
 TypeSystemDefinition :
   - SchemaDefinition
   - TypeDefinition
-  - TypeExtension
   - DirectiveDefinition
 
+TypeSystemExtension :
+  - SchemaExtension
+  - TypeExtension
+
 SchemaDefinition : schema Directives[Const]? { OperationTypeDefinition+ }
+
+SchemaExtension :
+  - extend schema Directives[Const]? { OperationTypeDefinition+ }
+  - extend schema Directives[Const]
 
 OperationTypeDefinition : OperationType : NamedType
 
@@ -288,6 +296,7 @@ ExecutableDirectiveLocation : one of
   `FRAGMENT_DEFINITION`
   `FRAGMENT_SPREAD`
   `INLINE_FRAGMENT`
+  `VARIABLE_DEFINITION`
 
 TypeSystemDirectiveLocation : one of
   `SCHEMA`
